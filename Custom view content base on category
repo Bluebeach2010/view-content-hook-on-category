@@ -1,20 +1,24 @@
-<php
+<?php
 /**
  * Custom Hook: Points based on custom view
  * Register the hook so myCRED can load it.
  * @since 1.0
  * @version 1.1
  */
-add_filter( 'mycred_setup_hooks', 'mycredpro_register_custom_view_hook' );
-function mycredpro_register_custom_view_hook( $installed, $point_type ) {
+add_filter( 'mycred_setup_hooks', 'mycredpro_register_custom_view_hook' , 10, 2 );
+function mycredpro_register_custom_view_hook( $installed, $category ) {
 
 	$installed['view_ct_content'] = array(
-		'title'       => __( '%plural% for Viewing Custom Content', 'mycred' ),
+		'title'       => __( '%plural% for Viewing Category Content', 'mycred' ),
 		'description' => __( 'Award %_plural% to users for a selected post type where the amount of points is solely based on the category associated with the post.', 'mycred' ),
 		'callback'    => array( 'myCRED_Hook_Custom_View' )
 	);
-
+	
 	return $installed;
+	
+	$category = is_category();
+	
+	return $category;
 
 }
 
@@ -34,21 +38,26 @@ function mycredpro_load_custom_view_hook() {
 		 * Construct
 		 */
 		function __construct( $hook_prefs, $type = MYCRED_DEFAULT_TYPE_KEY ) {
-		
+		    
+			$defaults = array(
+				'post'    => array(
+					'creds'   => 1,
+					'log'     => '%plural% for viewing a post category',
+					'acreds'  => 1,
+					'limit'   => '0/x',
+					'alog'    => '%plural% for view of your post category',
+					'visitor' => 0,
+					'alimit'  => '0/x',
+					'taxonomy' => 'category'
+				),
+			);
+			
+			if ( isset( $hook_prefs['view_ct_contents'] ) )
+				$defaults = $hook_prefs['view_ct_contents'];
+
 			parent::__construct( array(
-				'id'       => 'view_ct_content',
-				'defaults' => array(
-					'post_type' => 'post',
-					'creds'     => 1,
-					'log'       => '%plural% for viewing custom content',
-					'category'  => array('funny', 'lifeatwork', 'lifestyle', 'nsfw', 'tips-insight', 'traveling', 'trending-figure', 'wtf'),
-					'limit'     => '0/x',
-					'acreds'    => 1,
-					'alog'      => '%plural% for view of your custom content',
-					'acategory'  => array('funny', 'lifeatwork', 'lifestyle', 'nsfw', 'tips-insight', 'traveling', 'trending-figure', 'wtf'),
-					'alimit'    => '0/x',
-					'visitor'   => 0,
-					)
+				'id'       => 'view_ct_contents',
+				'defaults' => $defaults
 			), $hook_prefs, $type );
 
 		}
@@ -59,8 +68,7 @@ function mycredpro_load_custom_view_hook() {
 		 * @version 1.0.1
 		 */
 		public function run() {
-			add_action( 'post_category_status', array( $this, 'post_category' ), 10, 3 );
-			add_action( 'template_redirect', array( $this, 'content_loading' ), 999 );
+			add_action( 'template_redirect', array( $this, 'post_category' ), 10 );
 		}
 		
 		/**
@@ -68,72 +76,7 @@ function mycredpro_load_custom_view_hook() {
 		 * @since 1.0
 		 * @version 1.0
 		 */
-		public function post_category( $category, $post ) {
-
-			// Make sure the post being published is our type
-			if ( ! isset( $this->prefs['post_type'] ) || $this->prefs['post_type'] != $post->post_type ) return;
-
-			// Check for exclusions
-			if ( $this->core->exclude_user( $post->post_author ) === true ) return;
-
-			// We want to fire when content have category
-			$category         = apply_filters( 'mycred_category');
-
-			if ( $category ) {
-
-				// Get custom taxonomies
-				$terms = wp_get_object_terms( $post->ID, $this->prefs['taxonomy'] );
-				if ( is_wp_error( $terms ) ) return;
-
-				$total = 0;
-				if ( ! empty( $terms ) ) {
-
-					foreach ( $terms as $term ) {
-
-						// Amount should be held under the terms "description"
-						$amount = sanitize_text_field( $term->description );
-
-						// If nothing is set then we continue to the next one
-						if ( $amount == '' ) continue;
-
-						// Add to total
-						$total = $this->core->number( $total + $amount );
-
-					}
-
-				}
-
-				// If total is higher then zero award
-				if ( $total > 0 ) {
-
-					// Prep
-					$data = array( 'ref_type' => 'post' );
-
-					// Make sure this is unique
-					if ( $this->core->has_entry( 'post_category', $post->ID, $post->post_author, $data, $this->mycred_type ) ) return;
-
-					// Add Creds
-					$this->core->add_creds(
-						'post_category',
-						$post->post_author,
-						$total,
-						$this->prefs['log'],
-						$post->ID,
-						$data,
-						$this->mycred_type
-					);
-
-				}
-
-			}
-
-		}
-		/**
-		 * Content Loaded Hook
-		 * @since 1.0
-		 * @version 1.0
-		 */
-		public function content_loading() {
+		public function post_category() {
 			
 			// Only applicable on single post type view by logged in users
 			if ( ! is_singular() || ! is_user_logged_in() ) return;
@@ -200,9 +143,9 @@ function mycredpro_load_custom_view_hook() {
 			}
 
 		}
-
+		
 		/**
-		 * Preference for Post Category & Content Loaded Hook
+		 * Preference for Viewing Content Hook
 		 * @since 1.0
 		 * @version 1.0
 		 */
@@ -211,31 +154,6 @@ function mycredpro_load_custom_view_hook() {
 			$prefs = $this->prefs;
 
 ?>
-<label class="subheader"><?php _e( 'Post Type', 'mycred' ); ?></label>
-<ol>
-	<li>
-		<div class="h2"><input type="text" name="<?php echo $this->field_name( 'post_type' ); ?>" id="<?php echo $this->field_id( 'post_type' ); ?>" value="<?php echo esc_attr( $prefs['post_type'] ); ?>" class="long" /></div>
-	</li>
-</ol>
-<label class="subheader"><?php _e( 'Category', 'mycred' ); ?></label>
-<ol>
-	<li>
-		<div class="h2"><input type="text" name="<?php echo $this->field_name( 'category' ); ?>" id="<?php echo $this->field_id( 'category' ); ?>" value="<?php echo esc_attr( $prefs['category'] ); ?>" class="long" /></div>
-	</li>
-</ol>
-<label class="subheader"><?php _e( 'Amount', 'mycred' ); ?></label>
-<ol>
-	<li>
-		<p class="description"><?php echo $this->core->template_tags_general( __( 'Use your selected custom taxonomie\'s "Description" field to set the amount of %_plural% you want to award. Leave empty for no %_plural%.', 'mycred' ) ); ?></p>
-	</li>
-</ol>
-<label class="subheader"><?php _e( 'Log template', 'mycred' ); ?></label>
-<ol>
-	<li>
-		<div class="h2"><input type="text" name="<?php echo $this->field_name( 'log' ); ?>" id="<?php echo $this->field_id( 'log' ); ?>" value="<?php echo esc_attr( $prefs['log'] ); ?>" class="long" /></div>
-		<span class="description"><?php echo $this->available_template_tags( array( 'general', 'post' ) ); ?></span>
-	</li>
-</ol>
 <div class="hook-instance">
 	<h3><?php _e( 'Viewing Posts', 'mycred' ); ?></h3>
 	<div class="row">
@@ -281,79 +199,13 @@ function mycredpro_load_custom_view_hook() {
 		</div>
 	</div>
 </div>
-<div class="hook-instance">
-	<h3><?php _e( 'Viewing Pages', 'mycred' ); ?></h3>
-	<div class="row">
-		<div class="col-lg-2 col-md-6 col-sm-12 col-xs-12">
-			<div class="form-group">
-				<label for="<?php echo $this->field_id( array( 'page' => 'creds' ) ); ?>"><?php _e( 'Member', 'mycred' ); ?></label>
-				<input type="text" name="<?php echo $this->field_name( array( 'page' => 'creds' ) ); ?>" id="<?php echo $this->field_id( array( 'page' => 'creds' ) ); ?>" value="<?php echo $this->core->number( $prefs['page']['creds'] ); ?>" class="form-control" />
-			</div>
-		</div>
-		<div class="col-lg-4 col-md-6 col-sm-12 col-xs-12">
-			<div class="form-group">
-				<label for="<?php echo $this->field_id( array( 'page', 'limit' ) ); ?>"><?php _e( 'Limit', 'mycred' ); ?></label>
-				<?php echo $this->hook_limit_setting( $this->field_name( array( 'page', 'limit' ) ), $this->field_id( array( 'page', 'limit' ) ), $prefs['page']['limit'] ); ?>
-			</div>
-		</div>
-		<div class="col-lg-2 col-md-6 col-sm-12 col-xs-12">
-			<div class="form-group">
-				<label for="<?php echo $this->field_id( array( 'page' => 'acreds' ) ); ?>"><?php _e( 'Content Author', 'mycred' ); ?></label>
-				<input type="text" name="<?php echo $this->field_name( array( 'page' => 'acreds' ) ); ?>" id="<?php echo $this->field_id( array( 'page' => 'acreds' ) ); ?>" value="<?php echo $this->core->number( $prefs['page']['acreds'] ); ?>" class="form-control" />
-			</div>
-		</div>
-		<div class="col-lg-4 col-md-6 col-sm-12 col-xs-12">
-			<div class="form-group">
-				<label for="<?php echo $this->field_id( array( 'page', 'alimit' ) ); ?>"><?php _e( 'Limit', 'mycred' ); ?></label>
-				<?php echo $this->hook_limit_setting( $this->field_name( array( 'page', 'alimit' ) ), $this->field_id( array( 'page', 'alimit' ) ), $prefs['page']['alimit'] ); ?>
-			</div>
-		</div>
-	</div>
-	<div class="row">
-		<div class="col-lg-6 col-md-6 col-sm-12 col-xs-12">
-			<div class="form-group">
-				<label for="<?php echo $this->field_id( array( 'page' => 'log' ) ); ?>"><?php _e( 'Member Log Template', 'mycred' ); ?></label>
-				<input type="text" name="<?php echo $this->field_name( array( 'page' => 'log' ) ); ?>" id="<?php echo $this->field_id( array( 'page' => 'log' ) ); ?>" placeholder="<?php _e( 'required', 'mycred' ); ?>" value="<?php echo esc_attr( $prefs['page']['log'] ); ?>" class="form-control" />
-				<span class="description"><?php echo $this->available_template_tags( array( 'general', 'post' ) ); ?></span>
-			</div>
-		</div>
-		<div class="col-lg-6 col-md-6 col-sm-12 col-xs-12">
-			<div class="form-group">
-				<label for="<?php echo $this->field_id( array( 'page' => 'alog' ) ); ?>"><?php _e( 'Content Author Log Template', 'mycred' ); ?></label>
-				<input type="text" name="<?php echo $this->field_name( array( 'page' => 'alog' ) ); ?>" id="<?php echo $this->field_id( array( 'page' => 'alog' ) ); ?>" placeholder="<?php _e( 'required', 'mycred' ); ?>" value="<?php echo esc_attr( $prefs['page']['alog'] ); ?>" class="form-control" />
-				<span class="description"><?php echo $this->available_template_tags( array( 'general', 'post' ) ); ?></span>
-			</div>
-		</div>
-	</div>
-</div>
+<label class="subheader"><?php _e( 'Category', 'mycred' ); ?></label>
+<ol>
+	<li>
+		<div class="h2"><input type="text" name="<?php echo $this->field_name( 'category' ); ?>" id="<?php echo $this->field_id( 'category' ); ?>" value="<?php echo esc_attr( $prefs['category'] ); ?>" class="long" /></div>
+	</li>
+</ol>
 <?php
-
-			// Get all not built-in post types (excludes posts, pages, media)
-			$post_type_args = array(
-				'public'   => true,
-				'_builtin' => false
-			);
-			$post_types = get_post_types( $post_type_args, 'objects', 'and' ); 
-
-			foreach ( $post_types as $post_type ) {
-
-				// Points to award/deduct
-				if ( isset( $prefs[ $post_type->name ]['creds'] ) )
-					$_creds = $prefs[ $post_type->name ]['creds'];
-				else
-					$_creds = 0;
-
-				if ( isset( $prefs[ $post_type->name ]['limit'] ) )
-					$limit = $prefs[ $post_type->name ]['limit'];
-				else
-					$limit = '0/x';
-
-				// Log template
-				if ( isset( $prefs[ $post_type->name ]['log'] ) )
-					$_log = $prefs[ $post_type->name ]['log'];
-				else
-					$_log = '%plural% for viewing ' . $post_type->labels->name;
-
 				// Points to award/deduct
 				if ( isset( $prefs[ $post_type->name ]['acreds'] ) )
 					$_acreds = $prefs[ $post_type->name ]['acreds'];
@@ -372,56 +224,36 @@ function mycredpro_load_custom_view_hook() {
 					$_alog = '%plural% for view of your ' . $post_type->labels->name;
 
 ?>
-<div class="hook-instance">
-	<h3><?php printf( __( 'Viewing %s', 'mycred' ), $post_type->labels->name ); ?></h3>
-	<div class="row">
-		<div class="col-lg-2 col-md-6 col-sm-12 col-xs-12">
-			<div class="form-group">
-				<label for="<?php echo $this->field_id( array( $post_type->name => 'creds' ) ); ?>"><?php _e( 'Member', 'mycred' ); ?></label>
-				<input type="text" name="<?php echo $this->field_name( array( $post_type->name => 'creds' ) ); ?>" id="<?php echo $this->field_id( array( $post_type->name => 'creds' ) ); ?>" value="<?php echo $this->core->number( $_creds ); ?>" class="form-control" />
-			</div>
-		</div>
-		<div class="col-lg-4 col-md-6 col-sm-12 col-xs-12">
-			<div class="form-group">
-				<label for="<?php echo $this->field_id( array( $post_type->name, 'limit' ) ); ?>"><?php _e( 'Limit', 'mycred' ); ?></label>
-				<?php echo $this->hook_limit_setting( $this->field_name( array( $post_type->name, 'limit' ) ), $this->field_id( array( $post_type->name, 'limit' ) ), $limit ); ?>
-			</div>
-		</div>
-		<div class="col-lg-2 col-md-6 col-sm-12 col-xs-12">
-			<div class="form-group">
-				<label for="<?php echo $this->field_id( array( $post_type->name => 'acreds' ) ); ?>"><?php _e( 'Content Author', 'mycred' ); ?></label>
-				<input type="text" name="<?php echo $this->field_name( array( $post_type->name => 'acreds' ) ); ?>" id="<?php echo $this->field_id( array( $post_type->name => 'acreds' ) ); ?>" value="<?php echo $this->core->number( $_acreds ); ?>" class="form-control" />
-			</div>
-		</div>
-		<div class="col-lg-4 col-md-6 col-sm-12 col-xs-12">
-			<div class="form-group">
-				<label for="<?php echo $this->field_id( array( $post_type->name, 'alimit' ) ); ?>"><?php _e( 'Limit', 'mycred' ); ?></label>
-				<?php echo $this->hook_limit_setting( $this->field_name( array( $post_type->name, 'alimit' ) ), $this->field_id( array( $post_type->name, 'alimit' ) ), $alimit ); ?>
-			</div>
-		</div>
-	</div>
-	<div class="row">
-		<div class="col-lg-6 col-md-6 col-sm-12 col-xs-12">
-			<div class="form-group">
-				<label for="<?php echo $this->field_id( array( $post_type->name => 'log' ) ); ?>"><?php _e( 'Member', 'mycred' ); ?></label>
-				<input type="text" name="<?php echo $this->field_name( array( $post_type->name => 'log' ) ); ?>" id="<?php echo $this->field_id( array( $post_type->name => 'log' ) ); ?>" placeholder="<?php _e( 'required', 'mycred' ); ?>" value="<?php echo esc_attr( $_log ); ?>" class="form-control" />
-				<span class="description"><?php echo $this->available_template_tags( array( 'general', 'post' ) ); ?></span>
-			</div>
-		</div>
-		<div class="col-lg-6 col-md-6 col-sm-12 col-xs-12">
-			<div class="form-group">
-				<label for="<?php echo $this->field_id( array( $post_type->name => 'alog' ) ); ?>"><?php _e( 'Content Author', 'mycred' ); ?></label>
-				<input type="text" name="<?php echo $this->field_name( array( $post_type->name => 'alog' ) ); ?>" id="<?php echo $this->field_id( array( $post_type->name => 'alog' ) ); ?>" placeholder="<?php _e( 'required', 'mycred' ); ?>" value="<?php echo esc_attr( $_alog ); ?>" class="form-control" />
-				<span class="description"><?php echo $this->available_template_tags( array( 'general', 'post' ) ); ?></span>
-			</div>
-		</div>
-	</div>
-</div>
 <?php
-
 		}
 
 	}
 
-}
+	/**
+		 * Sanitise Preferences
+		 * @since 1.6
+		 * @version 1.0.1
+		 */
+		function sanitise_preferences( $data ) {
+			
+			if ( isset( $data['post']['alimit'] ) && isset( $data['post']['alimit_by'] ) ) {
+				$limit = sanitize_text_field( $data['post']['alimit'] );
+				if ( $limit == '' ) $limit = 0;
+				$data['post']['alimit'] = $limit . '/' . $data['post']['alimit_by'];
+				unset( $data['post']['alimit_by'] );
+			}
+			
+			if ( isset( $data['category']['alimit'] ) && isset( $data['category']['alimit_by'] ) ) {
+		
+		$limit = sanitize_text_field( $data['category']['alimit'] );
+				if ( $limit == '' ) $limit = 0;
+				$data['category']['alimit'] = $limit . '/' . $data['category']['alimit_by'];
+				unset( $data['category']['alimit_by'] );
+			}
+
+			return $data;
+
+		}
+
+	}
 ?>
